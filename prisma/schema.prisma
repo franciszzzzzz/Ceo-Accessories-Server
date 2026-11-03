@@ -1,0 +1,621 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserStatus {
+  active
+  suspended
+  disabled
+
+  @@map("user_status")
+}
+
+enum RoleName {
+  customer
+  vendor
+  admin
+
+  @@map("role_name")
+}
+
+enum VendorApplicationStatus {
+  pending
+  approved
+  rejected
+
+  @@map("vendor_application_status")
+}
+
+enum StoreStatus {
+  pending
+  active
+  suspended
+
+  @@map("store_status")
+}
+
+enum CategoryStatus {
+  active
+  archived
+
+  @@map("category_status")
+}
+
+enum ProductStatus {
+  draft
+  active
+  archived
+
+  @@map("product_status")
+}
+
+enum ProductVariantStatus {
+  active
+  archived
+
+  @@map("product_variant_status")
+}
+
+enum StockReservationStatus {
+  active
+  released
+  expired
+  converted
+
+  @@map("stock_reservation_status")
+}
+
+enum OrderStatus {
+  pending_payment
+  paid
+  cancelled
+  payment_failed
+  completed
+
+  @@map("order_status")
+}
+
+enum SubOrderStatus {
+  pending
+  confirmed
+  shipped
+  delivered
+  completed
+  cancelled
+  refunded
+
+  @@map("sub_order_status")
+}
+
+enum PaymentStatus {
+  pending
+  succeeded
+  failed
+  partially_refunded
+  refunded
+  needs_attention
+
+  @@map("payment_status")
+}
+
+enum PaymentAttemptStatus {
+  initializing
+  pending
+  succeeded
+  failed
+  expired
+
+  @@map("payment_attempt_status")
+}
+
+enum RefundStatus {
+  pending
+  processing
+  succeeded
+  failed
+  needs_attention
+
+  @@map("refund_status")
+}
+
+enum PaymentWebhookEventStatus {
+  processed
+  ignored
+  attention
+
+  @@map("payment_webhook_event_status")
+}
+
+enum LedgerEntryType {
+  vendor_sale
+  platform_commission
+  refund_adjustment
+  payout
+
+  @@map("ledger_entry_type")
+}
+
+enum PayoutStatus {
+  requested
+  approved
+  paid
+  rejected
+
+  @@map("payout_status")
+}
+
+model User {
+  id                         String               @id @default(uuid()) @db.Uuid
+  email                      String               @unique @db.VarChar(320)
+  passwordHash               String               @map("password_hash") @db.VarChar(255)
+  status                     UserStatus           @default(active)
+  passwordUpdatedAt          DateTime?            @map("password_updated_at") @db.Timestamptz(6)
+  createdAt                  DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  roles                      UserRole[]
+  refreshSessions            RefreshSession[]
+  passwordResets             PasswordResetToken[]
+  vendorApplications         VendorApplication[]  @relation("VendorApplicant")
+  reviewedVendorApplications VendorApplication[]  @relation("VendorReviewer")
+  store                      Store?
+  stockReservations          StockReservation[]
+  cart                       Cart?
+  orders                     Order[]
+  initiatedRefunds           Refund[]             @relation("RefundInitiator")
+  commissionRulesCreated     CommissionRule[]     @relation("CommissionRuleCreator")
+  payoutRequests             Payout[]             @relation("PayoutRequester")
+  payoutApprovals            Payout[]             @relation("PayoutApprover")
+  payoutRejections           Payout[]             @relation("PayoutRejector")
+  payoutCompletions          Payout[]             @relation("PayoutCompleter")
+
+  @@map("users")
+}
+
+model Role {
+  id        String     @id @default(uuid()) @db.Uuid
+  name      RoleName   @unique
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  userRoles UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  userId    String   @map("user_id") @db.Uuid
+  roleId    String   @map("role_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model RefreshSession {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  familyId  String    @map("family_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([familyId, revokedAt])
+  @@index([expiresAt])
+  @@map("refresh_sessions")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
+model VendorApplication {
+  id                  String                  @id @default(uuid()) @db.Uuid
+  userId              String                  @map("user_id") @db.Uuid
+  openUserId          String?                 @unique @map("open_user_id") @db.Uuid
+  status              VendorApplicationStatus @default(pending)
+  businessName        String                  @map("business_name") @db.VarChar(160)
+  storeName           String                  @map("store_name") @db.VarChar(120)
+  businessDescription String?                 @map("business_description") @db.VarChar(1000)
+  contactPhone        String                  @map("contact_phone") @db.VarChar(16)
+  rejectionReason     String?                 @map("rejection_reason") @db.VarChar(500)
+  reviewedById        String?                 @map("reviewed_by_id") @db.Uuid
+  reviewedAt          DateTime?               @map("reviewed_at") @db.Timestamptz(6)
+  createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  applicant           User                    @relation("VendorApplicant", fields: [userId], references: [id], onDelete: Cascade)
+  reviewer            User?                   @relation("VendorReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("vendor_applications")
+}
+
+model Store {
+  id              String           @id @default(uuid()) @db.Uuid
+  ownerId         String           @unique @map("owner_id") @db.Uuid
+  name            String           @db.VarChar(120)
+  slug            String           @unique @db.VarChar(140)
+  description     String?          @db.VarChar(1000)
+  contactPhone    String           @map("contact_phone") @db.VarChar(16)
+  status          StoreStatus      @default(pending)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  owner           User             @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  products        Product[]
+  variants        ProductVariant[]
+  subOrders       SubOrder[]
+  commissionRules CommissionRule[]
+  ledgerEntries   LedgerEntry[]
+  payouts         Payout[]
+
+  @@index([status, createdAt])
+  @@map("stores")
+}
+
+model Category {
+  id              String           @id @default(uuid()) @db.Uuid
+  parentId        String?          @map("parent_id") @db.Uuid
+  name            String           @db.VarChar(120)
+  slug            String           @unique @db.VarChar(140)
+  description     String?          @db.VarChar(1000)
+  sortOrder       Int              @default(0) @map("sort_order")
+  status          CategoryStatus   @default(active)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  parent          Category?        @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children        Category[]       @relation("CategoryHierarchy")
+  products        Product[]
+  commissionRules CommissionRule[]
+
+  @@index([parentId, sortOrder])
+  @@index([status, sortOrder])
+  @@map("categories")
+}
+
+model Product {
+  id          String           @id @default(uuid()) @db.Uuid
+  storeId     String           @map("store_id") @db.Uuid
+  name        String           @db.VarChar(180)
+  slug        String           @db.VarChar(180)
+  description String           @db.Text
+  status      ProductStatus    @default(draft)
+  deletedAt   DateTime?        @map("deleted_at") @db.Timestamptz(6)
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  store       Store            @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  categories  Category[]
+  variants    ProductVariant[]
+  media       ProductMedia[]
+
+  @@unique([id, storeId])
+  @@unique([storeId, slug])
+  @@index([storeId, status, createdAt])
+  @@index([status, createdAt])
+  @@map("products")
+}
+
+model ProductVariant {
+  id          String               @id @default(uuid()) @db.Uuid
+  productId   String               @map("product_id") @db.Uuid
+  storeId     String               @map("store_id") @db.Uuid
+  sku         String               @db.VarChar(100)
+  options     Json
+  priceAmount Int                  @map("price_amount")
+  currency    String               @default("NGN") @db.Char(3)
+  status      ProductVariantStatus @default(active)
+  createdAt   DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  product     Product              @relation(fields: [productId, storeId], references: [id, storeId], onDelete: Cascade)
+  store       Store                @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  inventory   InventoryItem?
+  cartItems   CartItem[]
+  orderItems  OrderItem[]
+
+  @@unique([storeId, sku])
+  @@index([productId, status])
+  @@map("product_variants")
+}
+
+model ProductMedia {
+  id          String   @id @default(uuid()) @db.Uuid
+  productId   String   @map("product_id") @db.Uuid
+  storageKey  String   @unique @map("storage_key") @db.VarChar(512)
+  contentType String   @map("content_type") @db.VarChar(100)
+  byteSize    Int      @map("byte_size")
+  altText     String?  @map("alt_text") @db.VarChar(300)
+  position    Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, position])
+  @@map("product_media")
+}
+
+model InventoryItem {
+  id                String             @id @default(uuid()) @db.Uuid
+  variantId         String             @unique @map("variant_id") @db.Uuid
+  quantityOnHand    Int                @default(0) @map("quantity_on_hand")
+  lowStockThreshold Int                @default(5) @map("low_stock_threshold")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  variant           ProductVariant     @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  reservations      StockReservation[]
+
+  @@index([quantityOnHand, lowStockThreshold])
+  @@map("inventory_items")
+}
+
+model StockReservation {
+  id          String                 @id @default(uuid()) @db.Uuid
+  userId      String                 @map("user_id") @db.Uuid
+  inventoryId String                 @map("inventory_id") @db.Uuid
+  quantity    Int
+  status      StockReservationStatus @default(active)
+  expiresAt   DateTime               @map("expires_at") @db.Timestamptz(6)
+  releasedAt  DateTime?              @map("released_at") @db.Timestamptz(6)
+  createdAt   DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user        User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  inventory   InventoryItem          @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+
+  @@index([inventoryId, status, expiresAt])
+  @@index([userId, status, expiresAt])
+  @@map("stock_reservations")
+}
+
+model Cart {
+  id        String     @id @default(uuid()) @db.Uuid
+  userId    String     @unique @map("user_id") @db.Uuid
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id                String         @id @default(uuid()) @db.Uuid
+  cartId            String         @map("cart_id") @db.Uuid
+  variantId         String         @map("variant_id") @db.Uuid
+  quantity          Int
+  quotedPriceAmount Int            @map("quoted_price_amount")
+  currency          String         @default("NGN") @db.Char(3)
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  cart              Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variant           ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, variantId])
+  @@index([variantId])
+  @@index([cartId, updatedAt])
+  @@map("cart_items")
+}
+
+model Order {
+  id              String      @id @default(uuid()) @db.Uuid
+  userId          String      @map("user_id") @db.Uuid
+  idempotencyKey  String      @map("idempotency_key") @db.VarChar(128)
+  requestHash     String      @map("request_hash") @db.Char(64)
+  status          OrderStatus @default(pending_payment)
+  totalAmount     BigInt      @map("total_amount")
+  currency        String      @default("NGN") @db.Char(3)
+  shippingAddress Json        @map("shipping_address")
+  cancelledAt     DateTime?   @map("cancelled_at") @db.Timestamptz(6)
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user            User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  subOrders       SubOrder[]
+  payment         Payment?
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("orders")
+}
+
+model SubOrder {
+  id            String         @id @default(uuid()) @db.Uuid
+  orderId       String         @map("order_id") @db.Uuid
+  storeId       String         @map("store_id") @db.Uuid
+  status        SubOrderStatus @default(pending)
+  totalAmount   BigInt         @map("total_amount")
+  currency      String         @default("NGN") @db.Char(3)
+  storeName     String         @map("store_name") @db.VarChar(120)
+  storeSlug     String         @map("store_slug") @db.VarChar(140)
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  order         Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  store         Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  items         OrderItem[]
+  ledgerEntries LedgerEntry[]
+
+  @@unique([orderId, storeId])
+  @@index([storeId, status, createdAt])
+  @@map("sub_orders")
+}
+
+model OrderItem {
+  id              String          @id @default(uuid()) @db.Uuid
+  subOrderId      String          @map("sub_order_id") @db.Uuid
+  variantId       String?         @map("variant_id") @db.Uuid
+  productName     String          @map("product_name") @db.VarChar(180)
+  productSlug     String          @map("product_slug") @db.VarChar(180)
+  sku             String          @db.VarChar(100)
+  options         Json
+  categoryIds     String[]        @default([]) @map("category_ids") @db.Uuid
+  quantity        Int
+  unitPriceAmount Int             @map("unit_price_amount")
+  lineTotalAmount BigInt          @map("line_total_amount")
+  currency        String          @default("NGN") @db.Char(3)
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  subOrder        SubOrder        @relation(fields: [subOrderId], references: [id], onDelete: Cascade)
+  variant         ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  @@index([subOrderId])
+  @@index([variantId])
+  @@map("order_items")
+}
+
+model Payment {
+  id        String           @id @default(uuid()) @db.Uuid
+  orderId   String           @unique @map("order_id") @db.Uuid
+  provider  String           @default("paystack") @db.VarChar(40)
+  amount    BigInt
+  currency  String           @default("NGN") @db.Char(3)
+  status    PaymentStatus    @default(pending)
+  paidAt    DateTime?        @map("paid_at") @db.Timestamptz(6)
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  order     Order            @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  attempts  PaymentAttempt[]
+  refunds   Refund[]
+
+  @@index([status, createdAt])
+  @@map("payments")
+}
+
+model PaymentAttempt {
+  id                    String               @id @default(uuid()) @db.Uuid
+  paymentId             String               @map("payment_id") @db.Uuid
+  reference             String               @unique @db.VarChar(128)
+  idempotencyKey        String               @map("idempotency_key") @db.VarChar(128)
+  providerTransactionId String?              @unique @map("provider_transaction_id") @db.VarChar(64)
+  authorizationUrl      String?              @map("authorization_url") @db.VarChar(2048)
+  status                PaymentAttemptStatus @default(initializing)
+  expiresAt             DateTime             @map("expires_at") @db.Timestamptz(6)
+  verifiedAt            DateTime?            @map("verified_at") @db.Timestamptz(6)
+  createdAt             DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  payment               Payment              @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@unique([paymentId, idempotencyKey])
+  @@index([paymentId, status, expiresAt])
+  @@map("payment_attempts")
+}
+
+model PaymentWebhookEvent {
+  id          String                    @id @default(uuid()) @db.Uuid
+  eventKey    String                    @unique @map("event_key") @db.VarChar(200)
+  eventType   String                    @map("event_type") @db.VarChar(100)
+  reference   String?                   @db.VarChar(128)
+  payloadHash String                    @map("payload_hash") @db.Char(64)
+  status      PaymentWebhookEventStatus @default(processed)
+  processedAt DateTime                  @default(now()) @map("processed_at") @db.Timestamptz(6)
+  createdAt   DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([reference, createdAt])
+  @@map("payment_webhook_events")
+}
+
+model Refund {
+  id               String       @id @default(uuid()) @db.Uuid
+  paymentId        String       @map("payment_id") @db.Uuid
+  initiatedById    String?      @map("initiated_by_id") @db.Uuid
+  idempotencyKey   String       @map("idempotency_key") @db.VarChar(128)
+  providerRefundId String?      @unique @map("provider_refund_id") @db.VarChar(64)
+  amount           BigInt
+  currency         String       @default("NGN") @db.Char(3)
+  status           RefundStatus @default(pending)
+  reason           String       @db.VarChar(500)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  payment          Payment      @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  initiatedBy      User?        @relation("RefundInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
+
+  @@unique([paymentId, idempotencyKey])
+  @@index([paymentId, status, createdAt])
+  @@map("refunds")
+}
+
+model CommissionRule {
+  id              String    @id @default(uuid()) @db.Uuid
+  storeId         String?   @map("store_id") @db.Uuid
+  categoryId      String?   @map("category_id") @db.Uuid
+  rateBasisPoints Int       @map("rate_basis_points")
+  effectiveFrom   DateTime  @map("effective_from") @db.Timestamptz(6)
+  effectiveUntil  DateTime? @map("effective_until") @db.Timestamptz(6)
+  createdById     String    @map("created_by_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  store           Store?    @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  category        Category? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  createdBy       User      @relation("CommissionRuleCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([storeId, categoryId, effectiveFrom, effectiveUntil])
+  @@map("commission_rules")
+}
+
+model LedgerEntry {
+  id          String          @id @default(uuid()) @db.Uuid
+  storeId     String          @map("store_id") @db.Uuid
+  subOrderId  String?         @map("sub_order_id") @db.Uuid
+  payoutId    String?         @map("payout_id") @db.Uuid
+  type        LedgerEntryType
+  amount      BigInt
+  currency    String          @default("NGN") @db.Char(3)
+  sourceKey   String          @unique @map("source_key") @db.VarChar(200)
+  description String          @db.VarChar(500)
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  store       Store           @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  subOrder    SubOrder?       @relation(fields: [subOrderId], references: [id], onDelete: Restrict)
+  payout      Payout?         @relation(fields: [payoutId], references: [id], onDelete: Restrict)
+
+  @@index([storeId, createdAt])
+  @@index([subOrderId, type])
+  @@map("ledger_entries")
+}
+
+model Payout {
+  id                String        @id @default(uuid()) @db.Uuid
+  storeId           String        @map("store_id") @db.Uuid
+  requestedById     String        @map("requested_by_id") @db.Uuid
+  approvedById      String?       @map("approved_by_id") @db.Uuid
+  rejectedById      String?       @map("rejected_by_id") @db.Uuid
+  completedById     String?       @map("completed_by_id") @db.Uuid
+  idempotencyKey    String        @map("idempotency_key") @db.VarChar(128)
+  requestHash       String        @map("request_hash") @db.Char(64)
+  amount            BigInt
+  currency          String        @default("NGN") @db.Char(3)
+  status            PayoutStatus  @default(requested)
+  externalReference String?       @map("external_reference") @db.VarChar(160)
+  rejectionReason   String?       @map("rejection_reason") @db.VarChar(500)
+  requestedAt       DateTime      @default(now()) @map("requested_at") @db.Timestamptz(6)
+  approvedAt        DateTime?     @map("approved_at") @db.Timestamptz(6)
+  rejectedAt        DateTime?     @map("rejected_at") @db.Timestamptz(6)
+  completedAt       DateTime?     @map("completed_at") @db.Timestamptz(6)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  store             Store         @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  requestedBy       User          @relation("PayoutRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  approvedBy        User?         @relation("PayoutApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  rejectedBy        User?         @relation("PayoutRejector", fields: [rejectedById], references: [id], onDelete: Restrict)
+  completedBy       User?         @relation("PayoutCompleter", fields: [completedById], references: [id], onDelete: Restrict)
+  ledgerEntries     LedgerEntry[]
+
+  @@unique([storeId, idempotencyKey])
+  @@unique([storeId, externalReference])
+  @@index([storeId, status, requestedAt])
+  @@index([status, requestedAt])
+  @@map("payouts")
+}
